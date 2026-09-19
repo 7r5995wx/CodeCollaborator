@@ -213,9 +213,6 @@ export default function SessionWorkspace() {
           } else {
             setWaitingUsers([]);
           }
-          if (data.participants) {
-            setParticipants(data.participants);
-          }
         } else {
           // Guest checks status
           if (data.userStatus === 'approved' || data.userStatus === 'host') {
@@ -231,6 +228,21 @@ export default function SessionWorkspace() {
           } else if (data.userStatus === 'rejected') {
             setUserStatus('rejected');
           }
+        }
+
+        // Sync participants for ALL users (Host & Guests)
+        if (data.participants && data.participants.length > 0) {
+          setParticipants(data.participants);
+        }
+
+        // Sync chat messages for ALL users
+        if (data.messages && data.messages.length > 0) {
+          setMessages((prev) => {
+            const existingIds = new Set(prev.map((m) => m.id));
+            const newMsgs = data.messages.filter((m: any) => !existingIds.has(m.id));
+            if (newMsgs.length === 0) return prev;
+            return [...prev, ...newMsgs].sort((a, b) => a.timestamp - b.timestamp);
+          });
         }
 
         if (data.lastExecution) {
@@ -477,11 +489,12 @@ export default function SessionWorkspace() {
     setIsConsoleExpanded(true);
 
     try {
+      const execLang = activeFile.language || activeLanguage;
       const response = await fetch('/api/execute', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          language: activeLanguage,
+          language: execLang,
           code: activeFile.content,
           stdin: stdinInput,
         }),
@@ -533,11 +546,24 @@ export default function SessionWorkspace() {
 
     setMessages((prev) => [...prev, newMsg]);
 
+    // Send via WebRTC
     realtimeRef.current?.sendMessage({
       type: 'CHAT_MESSAGE',
       senderId: currentUserId,
       payload: { message: newMsg },
     });
+
+    // Sync via Serverless API for reliable cross-client sync
+    fetch('/api/room', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'SEND_MESSAGE',
+        code: roomCode,
+        userId: currentUserId,
+        payload: { message: newMsg },
+      }),
+    }).catch(console.warn);
   };
 
   // WAITING ROOM SCREEN FOR GUESTS

@@ -170,6 +170,19 @@ export class RealtimeClient {
     conn.on('data', (data: PeerSignalMessage) => {
       if (data && data.senderId !== this.userId) {
         this.notifyHandlers(data);
+
+        // Host Star-Topology Relay: Forward guest messages to all other connected peers!
+        if (this.isHost) {
+          this.connections.forEach((peerConn, peerId) => {
+            if (peerId !== conn.peer && peerConn && peerConn.open) {
+              try {
+                peerConn.send(data);
+              } catch (e) {
+                console.warn('Host message relay warning:', e);
+              }
+            }
+          });
+        }
       }
     });
 
