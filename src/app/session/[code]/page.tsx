@@ -92,12 +92,13 @@ export default function SessionWorkspace() {
 
   // Realtime Engine Ref
   const realtimeRef = useRef<RealtimeClient | null>(null);
+  const pollTimerRef = useRef<any>(null);
 
   const activeFile = files.find((f) => f.id === activeFileId) || files[0];
 
   // Initialize Session Config & User Info
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    if (typeof window === 'undefined' || !roomCode) return;
 
     // Load session user info from sessionStorage / localStorage
     const storedUser = sessionStorage.getItem(`user_${roomCode}`) || localStorage.getItem(`user_${roomCode}`);
@@ -111,7 +112,6 @@ export default function SessionWorkspace() {
       name = parsed.name || 'Developer';
       hostFlag = !!parsed.isHost;
     } else {
-      // Prompt name if joining directly via URL
       name = prompt('Enter your name to join session:', 'Guest') || 'Guest';
       sessionStorage.setItem(`user_${roomCode}`, JSON.stringify({ name, isHost: false }));
     }
@@ -137,45 +137,52 @@ export default function SessionWorkspace() {
       }
     }
 
-    // Host is active immediately. Guests set waiting or active depending on approval rule.
     if (hostFlag) {
       setUserStatus('active');
+      // Create room state on serverless API
+      fetch('/api/room', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'CREATE_ROOM',
+          code: roomCode,
+          userId: currentUserId,
+          userName: name,
+          userColor,
+          payload: {
+            title: storedConfig ? JSON.parse(storedConfig).title : 'Collaborative Session',
+            approvalRequired: storedConfig ? JSON.parse(storedConfig).approvalRequired : true,
+            language: activeLanguage,
+            files,
+            activeFileId,
+          }
+        })
+      }).catch(console.warn);
+
+      addSystemMessage(`Session "${roomCode}" created by Host ${name}. Waiting for collaborators.`);
     } else {
       setUserStatus('waiting');
+      // Request join on serverless API
+      fetch('/api/room', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'REQUEST_JOIN',
+          code: roomCode,
+          userId: currentUserId,
+          userName: name,
+          userColor,
+        })
+      }).catch(console.warn);
+
+      addSystemMessage(`Sending join request for session "${roomCode}" as ${name}...`);
     }
 
-    // Initialize Realtime P2P / Mesh Client
+    // Initialize Realtime P2P Client
     const client = new RealtimeClient(roomCode, currentUserId, name, hostFlag, userColor);
     realtimeRef.current = client;
+    client.initPeerJS().catch(console.warn);
 
-    client.initPeerJS().then(() => {
-      if (hostFlag) {
-        setParticipants([
-          {
-            id: currentUserId,
-            name: name,
-            isHost: true,
-            color: userColor,
-            joinedAt: Date.now(),
-            status: 'active',
-          },
-        ]);
-        addSystemMessage(`Session "${roomCode}" created by Host ${name}. Waiting for collaborators.`);
-      } else {
-        // Send JOIN_REQUEST immediately over broadcast channel + WebRTC
-        client.sendMessage({
-          type: 'JOIN_REQUEST',
-          senderId: currentUserId,
-          payload: {
-            name,
-            color: userColor,
-          },
-        });
-        addSystemMessage(`Sending join request for session "${roomCode}" as ${name}...`);
-      }
-    });
-
-    // Listen to incoming messages
     const unsubscribe = client.onMessage((msg: PeerSignalMessage) => {
       handleIncomingMessage(msg);
     });
@@ -185,6 +192,59 @@ export default function SessionWorkspace() {
       client.disconnect();
     };
   }, [roomCode]);
+
+  // Serverless Polling Timer (Runs every 1.5s to ensure 100% reliability across devices)
+  useEffect(() => {
+    if (!roomCode) return;
+
+    pollTimerRef.current = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/room?code=${roomCode}&userId=${currentUserId}`);
+        if (!res.ok) return;
+        const data = await res.json();
+
+        if (!data.exists) return;
+
+        if (isHost) {
+          // Host receives pending queue
+          if (data.pendingQueue && data.pendingQueue.length > 0) {
+            setWaitingUsers(data.pendingQueue);
+            setIsWaitingRoomOpen(true);
+          } else {
+            setWaitingUsers([]);
+          }
+          if (data.participants) {
+            setParticipants(data.participants);
+          }
+        } else {
+          // Guest checks status
+          if (data.userStatus === 'approved' || data.userStatus === 'host') {
+            if (userStatus !== 'active') {
+              setUserStatus('active');
+              if (data.files && data.files.length > 0) setFiles(data.files);
+              if (data.activeFileId) setActiveFileId(data.activeFileId);
+              addSystemMessage('🎉 Host approved your request! Welcome to the live session.');
+            }
+            if (data.files && data.files.length > 0) {
+              setFiles(data.files);
+            }
+          } else if (data.userStatus === 'rejected') {
+            setUserStatus('rejected');
+          }
+        }
+
+        if (data.lastExecution) {
+          setExecutionResult(data.lastExecution);
+        }
+      } catch (err) {
+        console.warn('Room poll warning:', err);
+      }
+    }, 1500);
+
+    return () => {
+      if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+    };
+  }, [roomCode, isHost, currentUserId, userStatus]);
 
   const addSystemMessage = (text: string) => {
     setMessages((prev) => [
@@ -201,7 +261,7 @@ export default function SessionWorkspace() {
     ]);
   };
 
-  // Handle incoming signals
+  // Handle incoming P2P WebRTC signals
   const handleIncomingMessage = useCallback(
     (msg: PeerSignalMessage) => {
       const { type, senderId, payload } = msg;
@@ -218,33 +278,12 @@ export default function SessionWorkspace() {
               status: approvalRequired ? 'waiting' : 'active',
             };
 
-            if (approvalRequired) {
-              setWaitingUsers((prev) => {
-                const exists = prev.some((u) => u.id === senderId);
-                if (exists) return prev;
-                return [...prev, newUser];
-              });
-
-              // Automatically open waiting room modal for Host so it's impossible to miss!
-              setIsWaitingRoomOpen(true);
-              addSystemMessage(`🔔 ${payload.name} is waiting in queue to join.`);
-            } else {
-              setParticipants((prev) => [...prev.filter((u) => u.id !== senderId), newUser]);
-              
-              // Send approve join state back
-              realtimeRef.current?.sendMessage({
-                type: 'APPROVE_JOIN',
-                senderId: currentUserId,
-                payload: {
-                  targetUserId: senderId,
-                  files,
-                  activeFileId,
-                  activeLanguage,
-                  sessionTitle,
-                },
-              });
-              addSystemMessage(`${payload.name} joined the session.`);
-            }
+            setWaitingUsers((prev) => {
+              if (prev.some((u) => u.id === senderId)) return prev;
+              return [...prev, newUser];
+            });
+            setIsWaitingRoomOpen(true);
+            addSystemMessage(`🔔 ${payload.name} requested to join the session.`);
           }
           break;
 
@@ -253,8 +292,7 @@ export default function SessionWorkspace() {
             setUserStatus('active');
             if (payload.files) setFiles(payload.files);
             if (payload.activeFileId) setActiveFileId(payload.activeFileId);
-            if (payload.activeLanguage) setActiveLanguage(payload.activeLanguage);
-            addSystemMessage('🎉 Host approved your request! Welcome to the live session.');
+            addSystemMessage('🎉 Host approved your request!');
           }
           break;
 
@@ -301,68 +339,102 @@ export default function SessionWorkspace() {
   );
 
   // Host Approve/Deny actions
-  const handleApproveUser = (targetUserId: string) => {
+  const handleApproveUser = async (targetUserId: string) => {
     const userToApprove = waitingUsers.find((u) => u.id === targetUserId);
-    if (!userToApprove) return;
 
     setWaitingUsers((prev) => prev.filter((u) => u.id !== targetUserId));
-    setParticipants((prev) => [...prev, { ...userToApprove, status: 'active' }]);
+    if (userToApprove) {
+      setParticipants((prev) => [...prev, { ...userToApprove, status: 'active' }]);
+    }
+
+    // Call serverless API
+    await fetch('/api/room', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'APPROVE_GUEST',
+        code: roomCode,
+        userId: currentUserId,
+        payload: {
+          targetUserId,
+          guestInfo: userToApprove,
+        }
+      })
+    }).catch(console.warn);
 
     realtimeRef.current?.sendMessage({
       type: 'APPROVE_JOIN',
       senderId: currentUserId,
-      payload: {
-        targetUserId,
-        files,
-        activeFileId,
-        activeLanguage,
-        sessionTitle,
-      },
+      payload: { targetUserId, files, activeFileId, activeLanguage, sessionTitle },
     });
 
-    addSystemMessage(`Approved ${userToApprove.name}.`);
+    addSystemMessage(`Approved ${userToApprove?.name || 'Guest'}.`);
   };
 
-  const handleRejectUser = (targetUserId: string) => {
+  const handleRejectUser = async (targetUserId: string) => {
     setWaitingUsers((prev) => prev.filter((u) => u.id !== targetUserId));
+
+    await fetch('/api/room', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'REJECT_GUEST',
+        code: roomCode,
+        userId: currentUserId,
+        payload: { targetUserId }
+      })
+    }).catch(console.warn);
 
     realtimeRef.current?.sendMessage({
       type: 'REJECT_JOIN',
       senderId: currentUserId,
-      payload: {
-        targetUserId,
-      },
+      payload: { targetUserId },
     });
   };
 
-  // Resend join request from guest side if needed
   const handleResendJoinRequest = () => {
-    if (realtimeRef.current) {
-      realtimeRef.current.sendMessage({
-        type: 'JOIN_REQUEST',
-        senderId: currentUserId,
-        payload: {
-          name: userName,
-          color: userColor,
-        },
-      });
-      addSystemMessage('Resent join request to Host...');
-    }
+    fetch('/api/room', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'REQUEST_JOIN',
+        code: roomCode,
+        userId: currentUserId,
+        userName,
+        userColor,
+      })
+    }).catch(console.warn);
+
+    realtimeRef.current?.sendMessage({
+      type: 'JOIN_REQUEST',
+      senderId: currentUserId,
+      payload: { name: userName, color: userColor },
+    });
+
+    addSystemMessage('Resent join request to Host...');
   };
 
   // Code change broadcast
   const handleCodeChange = (newContent: string) => {
-    setFiles((prev) =>
-      prev.map((f) => (f.id === activeFileId ? { ...f, content: newContent } : f))
-    );
+    const updatedFiles = files.map((f) => (f.id === activeFileId ? { ...f, content: newContent } : f));
+    setFiles(updatedFiles);
+
+    // Sync to serverless API & WebRTC
+    fetch('/api/room', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'UPDATE_FILES',
+        code: roomCode,
+        userId: currentUserId,
+        payload: { files: updatedFiles, activeFileId, language: activeLanguage }
+      })
+    }).catch(console.warn);
 
     realtimeRef.current?.sendMessage({
       type: 'CODE_CHANGE',
       senderId: currentUserId,
-      payload: {
-        fileId: activeFileId,
-        content: newContent,
-      },
+      payload: { fileId: activeFileId, content: newContent },
     });
   };
 
@@ -371,26 +443,33 @@ export default function SessionWorkspace() {
     setActiveLanguage(lang);
     const spec = SUPPORTED_LANGUAGES[lang];
     if (spec) {
-      setFiles((prev) =>
-        prev.map((f) =>
-          f.id === activeFileId
-            ? { ...f, language: lang, name: `main.${spec.extension}`, content: spec.sampleCode }
-            : f
-        )
+      const updatedFiles = files.map((f) =>
+        f.id === activeFileId
+          ? { ...f, language: lang, name: `main.${spec.extension}`, content: spec.sampleCode }
+          : f
       );
+      setFiles(updatedFiles);
+
+      fetch('/api/room', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'UPDATE_FILES',
+          code: roomCode,
+          userId: currentUserId,
+          payload: { files: updatedFiles, activeFileId, language: lang }
+        })
+      }).catch(console.warn);
       
       realtimeRef.current?.sendMessage({
         type: 'CODE_CHANGE',
         senderId: currentUserId,
-        payload: {
-          fileId: activeFileId,
-          content: spec.sampleCode,
-        },
+        payload: { fileId: activeFileId, content: spec.sampleCode },
       });
     }
   };
 
-  // Code Execution handler
+  // Code Execution handler with Stdin Input
   const handleRunCode = async () => {
     if (!activeFile) return;
 
@@ -404,20 +483,29 @@ export default function SessionWorkspace() {
         body: JSON.stringify({
           language: activeLanguage,
           code: activeFile.content,
+          stdin: stdinInput,
         }),
       });
 
       const data = await response.json();
       setExecutionResult(data);
 
+      fetch('/api/room', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'RECORD_EXECUTION',
+          code: roomCode,
+          userId: currentUserId,
+          payload: { execution: data }
+        })
+      }).catch(console.warn);
+
       // Broadcast output to room
       realtimeRef.current?.sendMessage({
         type: 'TERMINAL_OUTPUT',
         senderId: currentUserId,
-        payload: {
-          result: data,
-          executedBy: userName,
-        },
+        payload: { result: data, executedBy: userName },
       });
     } catch (e: any) {
       setExecutionResult({
@@ -448,9 +536,7 @@ export default function SessionWorkspace() {
     realtimeRef.current?.sendMessage({
       type: 'CHAT_MESSAGE',
       senderId: currentUserId,
-      payload: {
-        message: newMsg,
-      },
+      payload: { message: newMsg },
     });
   };
 
@@ -604,8 +690,21 @@ export default function SessionWorkspace() {
                     language: lang,
                     content: SUPPORTED_LANGUAGES[lang]?.sampleCode || '',
                   };
-                  setFiles((prev) => [...prev, newFile]);
+                  const updatedFiles = [...files, newFile];
+                  setFiles(updatedFiles);
                   setActiveFileId(newFile.id);
+
+                  fetch('/api/room', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      action: 'UPDATE_FILES',
+                      code: roomCode,
+                      userId: currentUserId,
+                      payload: { files: updatedFiles, activeFileId: newFile.id, language: lang }
+                    })
+                  }).catch(console.warn);
+
                   realtimeRef.current?.sendMessage({
                     type: 'CREATE_FILE',
                     senderId: currentUserId,
@@ -613,10 +712,23 @@ export default function SessionWorkspace() {
                   });
                 }}
                 onDeleteFile={(id) => {
-                  setFiles((prev) => prev.filter((f) => f.id !== id));
-                  if (activeFileId === id && files.length > 1) {
-                    setActiveFileId(files[0].id);
+                  const updatedFiles = files.filter((f) => f.id !== id);
+                  setFiles(updatedFiles);
+                  if (activeFileId === id && updatedFiles.length > 0) {
+                    setActiveFileId(updatedFiles[0].id);
                   }
+
+                  fetch('/api/room', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      action: 'UPDATE_FILES',
+                      code: roomCode,
+                      userId: currentUserId,
+                      payload: { files: updatedFiles, activeFileId: updatedFiles[0]?.id }
+                    })
+                  }).catch(console.warn);
+
                   realtimeRef.current?.sendMessage({
                     type: 'DELETE_FILE',
                     senderId: currentUserId,
@@ -681,6 +793,7 @@ export default function SessionWorkspace() {
                 stdin={stdinInput}
                 onStdinChange={setStdinInput}
                 codeContent={activeFile?.content || ''}
+                onRunCode={handleRunCode}
               />
             </div>
           ) : (
