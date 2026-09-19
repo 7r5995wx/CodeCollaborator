@@ -173,7 +173,19 @@ export default function SessionWorkspace() {
           userName: name,
           userColor,
         })
-      }).catch(console.warn);
+      })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.room) {
+          if (data.room.files && data.room.files.length > 0) setFiles(data.room.files);
+          if (data.room.activeFileId) setActiveFileId(data.room.activeFileId);
+          const roomLang = data.room.language || data.room.files?.[0]?.language;
+          if (roomLang && SUPPORTED_LANGUAGES[roomLang as LanguageId]) {
+            setActiveLanguage(roomLang as LanguageId);
+          }
+        }
+      })
+      .catch(console.warn);
 
       addSystemMessage(`Sending join request for session "${roomCode}" as ${name}...`);
     }
@@ -218,12 +230,17 @@ export default function SessionWorkspace() {
           if (data.userStatus === 'approved' || data.userStatus === 'host') {
             if (userStatus !== 'active') {
               setUserStatus('active');
-              if (data.files && data.files.length > 0) setFiles(data.files);
-              if (data.activeFileId) setActiveFileId(data.activeFileId);
               addSystemMessage('🎉 Host approved your request! Welcome to the live session.');
             }
             if (data.files && data.files.length > 0) {
               setFiles(data.files);
+            }
+            if (data.activeFileId) {
+              setActiveFileId(data.activeFileId);
+            }
+            const syncedLang = data.language || data.files?.[0]?.language;
+            if (syncedLang && SUPPORTED_LANGUAGES[syncedLang as LanguageId]) {
+              setActiveLanguage(syncedLang as LanguageId);
             }
           } else if (data.userStatus === 'rejected') {
             setUserStatus('rejected');
@@ -304,6 +321,10 @@ export default function SessionWorkspace() {
             setUserStatus('active');
             if (payload.files) setFiles(payload.files);
             if (payload.activeFileId) setActiveFileId(payload.activeFileId);
+            const roomLang = payload.activeLanguage || payload.files?.[0]?.language;
+            if (roomLang && SUPPORTED_LANGUAGES[roomLang as LanguageId]) {
+              setActiveLanguage(roomLang as LanguageId);
+            }
             addSystemMessage('🎉 Host approved your request!');
           }
           break;
