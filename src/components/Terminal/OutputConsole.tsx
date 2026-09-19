@@ -12,7 +12,8 @@ import {
   ChevronUp,
   Keyboard,
   HelpCircle,
-  Sparkles
+  Sparkles,
+  Play
 } from 'lucide-react';
 import { ExecutionResult } from '@/lib/types';
 
@@ -26,6 +27,7 @@ interface OutputConsoleProps {
   stdin: string;
   onStdinChange: (val: string) => void;
   codeContent?: string;
+  onRunCode?: () => void;
 }
 
 export const OutputConsole: React.FC<OutputConsoleProps> = ({
@@ -38,11 +40,17 @@ export const OutputConsole: React.FC<OutputConsoleProps> = ({
   stdin,
   onStdinChange,
   codeContent = '',
+  onRunCode,
 }) => {
   const [activeTab, setActiveTab] = useState<'output' | 'stdin'>('output');
 
   // Detect if code requires interactive input (cin, input(), Scanner, scanf)
   const requiresInput = /cin\s*>>|input\s*\(|Scanner|scanf\s*\(|readline\s*\(/i.test(codeContent);
+
+  const handleRunFromStdinTab = () => {
+    setActiveTab('output');
+    if (onRunCode) onRunCode();
+  };
 
   return (
     <div className={`bg-dark-900 border-t border-white/10 flex flex-col transition-all duration-300 ${
@@ -151,18 +159,39 @@ export const OutputConsole: React.FC<OutputConsoleProps> = ({
                 <span>Compiling and executing code with provided stdin input...</span>
               </div>
             ) : result ? (
-              <div className="space-y-2">
+              <div className="space-y-3">
+                {/* Input missing warning box */}
+                {requiresInput && !stdin.trim() && (
+                  <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 text-amber-300 font-sans text-xs flex items-start justify-between gap-3">
+                    <div className="flex items-start gap-2">
+                      <HelpCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                      <div>
+                        <p className="font-bold text-amber-200">Your code expects program input (<code className="text-amber-400 font-mono">cin &gt;&gt;</code> / <code className="text-amber-400 font-mono">input()</code>)!</p>
+                        <p className="text-[11px] text-amber-300/80 mt-0.5">
+                          Since no input was entered, your program read EOF. Switch to the <strong>Program Input (stdin)</strong> tab, enter your test inputs (e.g. 5), then click <strong>Run Code with Input</strong>.
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setActiveTab('stdin')}
+                      className="px-2.5 py-1 bg-amber-500 text-dark-950 font-bold rounded-lg text-xs shrink-0 hover:bg-amber-400 transition-all shadow-sm"
+                    >
+                      Enter Input Now
+                    </button>
+                  </div>
+                )}
+
                 {result.stdout && (
                   <div>
                     <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">STDOUT:</div>
-                    <pre className="text-emerald-400 whitespace-pre-wrap font-mono">{result.stdout}</pre>
+                    <pre className="text-emerald-400 whitespace-pre-wrap font-mono bg-dark-900/60 p-3 rounded-xl border border-white/5">{result.stdout}</pre>
                   </div>
                 )}
 
                 {result.stderr && (
                   <div>
                     <div className="text-[10px] font-semibold text-rose-500 uppercase tracking-wider mb-1">STDERR:</div>
-                    <pre className="text-rose-400 whitespace-pre-wrap font-mono">{result.stderr}</pre>
+                    <pre className="text-rose-400 whitespace-pre-wrap font-mono bg-dark-900/60 p-3 rounded-xl border border-white/5">{result.stderr}</pre>
                   </div>
                 )}
 
@@ -171,11 +200,11 @@ export const OutputConsole: React.FC<OutputConsoleProps> = ({
                 )}
               </div>
             ) : (
-              <div className="text-slate-500 flex flex-col items-center justify-center h-full gap-2 text-center">
+              <div className="text-slate-500 flex flex-col items-center justify-center h-full gap-2 text-center font-sans">
                 <span>Press <kbd className="px-1.5 py-0.5 bg-white/10 rounded text-slate-300">Run Code</kbd> to compile.</span>
                 {requiresInput && (
                   <p className="text-amber-400 text-xs flex items-center gap-1 font-sans">
-                    <Sparkles className="w-3.5 h-3.5" />
+                    <Sparkles className="w-3.5 h-3.5 text-amber-400" />
                     Tip: Enter input values in the <strong>Program Input (stdin)</strong> tab before running!
                   </p>
                 )}
@@ -189,16 +218,24 @@ export const OutputConsole: React.FC<OutputConsoleProps> = ({
                   <Keyboard className="w-4 h-4 text-brand-cyan" />
                   <span>Program Standard Input (stdin)</span>
                 </label>
-                <span className="text-[11px] text-slate-400">
-                  Enter inputs line-by-line for program statements like <code className="text-brand-400">cin &gt;&gt; x</code>, <code className="text-brand-400">input()</code>, or <code className="text-brand-400">Scanner</code>
-                </span>
+
+                {onRunCode && (
+                  <button
+                    onClick={handleRunFromStdinTab}
+                    disabled={isExecuting}
+                    className="px-3 py-1 bg-emerald-500 hover:bg-emerald-400 text-dark-950 font-bold rounded-lg text-xs flex items-center gap-1.5 shadow-sm transition-all"
+                  >
+                    <Play className="w-3.5 h-3.5 fill-current" />
+                    <span>Run Code with Input</span>
+                  </button>
+                )}
               </div>
 
               <textarea
                 value={stdin}
                 onChange={(e) => onStdinChange(e.target.value)}
-                placeholder={`Example inputs:\n5\n10 20\n30`}
-                rows={6}
+                placeholder={`Enter inputs line-by-line for cin >>, input(), Scanner:\nExample:\n5\n10 20`}
+                rows={5}
                 className="w-full flex-1 bg-dark-900 border border-white/10 rounded-xl p-3 text-xs font-mono text-slate-100 focus:border-brand-500 outline-none placeholder:text-slate-600 resize-none"
               />
             </div>

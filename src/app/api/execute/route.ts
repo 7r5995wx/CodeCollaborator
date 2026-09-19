@@ -2,11 +2,24 @@ import { NextRequest, NextResponse } from 'next/server';
 import { SUPPORTED_LANGUAGES } from '@/lib/piston';
 import { LanguageId } from '@/lib/types';
 
-// Wandbox compiler mappings (Free, open public REST API)
+// Piston language mapping
+const PISTON_LANGUAGES: Record<LanguageId, { language: string; version: string }> = {
+  javascript: { language: 'javascript', version: '18.15.0' },
+  typescript: { language: 'typescript', version: '5.0.3' },
+  python: { language: 'python', version: '3.10.0' },
+  cpp: { language: 'cpp', version: '10.2.0' },
+  java: { language: 'java', version: '15.0.2' },
+  csharp: { language: 'csharp', version: '6.12.0' },
+  go: { language: 'go', version: '1.16.2' },
+  rust: { language: 'rust', version: '1.68.2' },
+  html: { language: 'html', version: '5.0' },
+};
+
+// Wandbox compiler mappings
 const WANDBOX_COMPILERS: Record<LanguageId, string> = {
   javascript: 'nodejs-head',
   typescript: 'typescript-head',
-  python: 'python-head',
+  python: 'cpython-head',
   cpp: 'gcc-head',
   java: 'openjdk-head',
   csharp: 'dotnet-head',
@@ -15,7 +28,7 @@ const WANDBOX_COMPILERS: Record<LanguageId, string> = {
   html: 'html',
 };
 
-// Judge0 language IDs (Fallback public CE instance)
+// Judge0 language IDs
 const JUDGE0_LANGUAGE_IDS: Record<LanguageId, number> = {
   javascript: 63,
   typescript: 74,
@@ -35,7 +48,9 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const { language, code, stdin } = body as { language: LanguageId; code: string; stdin?: string };
 
-    const programInput = stdin || '';
+    // Cleanly format program input with trailing newline for cin >>, input(), Scanner
+    const rawInput = (stdin || '').trim();
+    const programInput = rawInput !== '' ? rawInput + '\n' : '';
 
     if (!language || !SUPPORTED_LANGUAGES[language]) {
       return NextResponse.json(
@@ -65,7 +80,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // 2. High-Speed V8 Runtime for JavaScript
+    // 2. High-Speed V8 Runtime for JavaScript (Client/Server Sandbox)
     if (language === 'javascript') {
       try {
         const logs: string[] = [];
@@ -93,18 +108,54 @@ export async function POST(req: NextRequest) {
           version: 'Node.js 18.x',
         });
       } catch (err: any) {
-        return NextResponse.json({
-          stdout: '',
-          stderr: err.toString(),
-          output: err.toString(),
-          code: 1,
-          executionTime: Date.now() - startTime,
-          language: 'JavaScript (V8 Runtime)',
-        });
+        // Fall through to Piston if standard runner threw
       }
     }
 
-    // 3. Try Primary Execution Engine: Wandbox API with stdin input
+    // 3. Primary Execution Engine: Piston API (supports cin, input, stdin)
+    try {
+      const pistonConfig = PISTON_LANGUAGES[language] || { language, version: '*' };
+      const pistonResponse = await fetch('https://emkc.org/api/v2/piston/execute', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          language: pistonConfig.language,
+          version: pistonConfig.version,
+          files: [
+            {
+              content: code,
+            }
+          ],
+          stdin: programInput,
+        }),
+      });
+
+      if (pistonResponse.ok) {
+        const data = await pistonResponse.json();
+        const executionTime = Date.now() - startTime;
+        const runData = data.run || {};
+
+        const stdout = runData.stdout || '';
+        const stderr = runData.stderr || (runData.output && runData.code !== 0 ? runData.output : '');
+        const exitCode = typeof runData.code === 'number' ? runData.code : 0;
+
+        return NextResponse.json({
+          stdout: stdout.trim(),
+          stderr: stderr.trim(),
+          output: (stdout || stderr).trim(),
+          code: exitCode,
+          executionTime,
+          language: langSpec.name,
+          version: data.version ? `Piston v${data.version}` : 'Piston Execution Engine',
+        });
+      }
+    } catch (pistonError) {
+      console.warn('Piston execution fallback triggered:', pistonError);
+    }
+
+    // 4. Secondary Fallback Engine: Wandbox API
     try {
       const wandboxCompiler = WANDBOX_COMPILERS[language] || 'gcc-head';
       const wandboxResponse = await fetch('https://wandbox.org/api/compile.json', {
@@ -128,9 +179,9 @@ export async function POST(req: NextRequest) {
         const status = data.status === '0' || data.status === 0 ? 0 : (data.status ? parseInt(data.status, 10) : 0);
 
         return NextResponse.json({
-          stdout,
-          stderr,
-          output: stdout || stderr,
+          stdout: stdout.trim(),
+          stderr: stderr.trim(),
+          output: (stdout || stderr).trim(),
           code: status,
           executionTime,
           language: langSpec.name,
@@ -141,7 +192,7 @@ export async function POST(req: NextRequest) {
       console.warn('Wandbox execution fallback triggered:', wandboxError);
     }
 
-    // 4. Try Secondary Fallback Engine: Judge0 CE API with stdin input
+    // 5. Tertiary Fallback Engine: Judge0 CE API
     try {
       const judge0LangId = JUDGE0_LANGUAGE_IDS[language] || 71;
       const judge0Response = await fetch('https://ce.judge0.com/submissions?wait=true', {
@@ -165,9 +216,9 @@ export async function POST(req: NextRequest) {
         const status = data.status?.id === 3 ? 0 : 1;
 
         return NextResponse.json({
-          stdout,
-          stderr,
-          output: stdout || stderr,
+          stdout: stdout.trim(),
+          stderr: stderr.trim(),
+          output: (stdout || stderr).trim(),
           code: status,
           executionTime,
           language: langSpec.name,
@@ -178,10 +229,10 @@ export async function POST(req: NextRequest) {
       console.warn('Judge0 execution fallback triggered:', judge0Error);
     }
 
-    // 5. Ultimate Fallback: Clear notification
+    // 6. Ultimate Fallback
     return NextResponse.json({
       stdout: '',
-      stderr: 'Unable to reach public compilation APIs. Please check your internet connection.',
+      stderr: 'Unable to reach public compilation APIs. Please check your network connection.',
       output: 'Network error',
       code: 1,
       executionTime: Date.now() - startTime,
@@ -198,3 +249,4 @@ export async function POST(req: NextRequest) {
     });
   }
 }
+

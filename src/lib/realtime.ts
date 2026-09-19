@@ -77,8 +77,8 @@ export class RealtimeClient {
             // Host starts broadcasting heartbeat every 2.5 seconds
             this.startHostHeartbeat();
           } else {
-            // Guest connects to Host peer ID directly
-            this.connectToPeer(this.hostPeerId);
+            // Guest starts continuous reconnection loop to Host until connected
+            this.startGuestRetryLoop();
           }
 
           resolve(id);
@@ -90,12 +90,14 @@ export class RealtimeClient {
 
         this.peer.on('error', (err: any) => {
           console.warn('PeerJS Connection Warning:', err.type);
+          if (!this.isHost) this.startGuestRetryLoop();
           this.notifyConnectionStatus('mesh_active');
           resolve(this.userId);
         });
       });
     } catch (e) {
       console.warn('PeerJS Initialization Fallback:', e);
+      if (!this.isHost) this.startGuestRetryLoop();
       this.notifyConnectionStatus('mesh_active');
       return this.userId;
     }
@@ -116,7 +118,36 @@ export class RealtimeClient {
           }
         });
       }
-    }, 2500);
+    }, 2000);
+  }
+
+  private startGuestRetryLoop() {
+    if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
+
+    const attemptConnect = () => {
+      if (this.isHost) return;
+      const conn = this.connections.get(this.hostPeerId);
+      if (!conn || !conn.open) {
+        this.connectToPeer(this.hostPeerId);
+      } else {
+        // Send join request signal over active connection
+        try {
+          conn.send({
+            type: 'JOIN_REQUEST',
+            senderId: this.userId,
+            payload: {
+              name: this.userName,
+              color: this.userColor,
+            },
+          });
+        } catch (e) {
+          console.warn('Signal send error:', e);
+        }
+      }
+    };
+
+    attemptConnect();
+    this.heartbeatTimer = setInterval(attemptConnect, 1500);
   }
 
   private setupConnection(conn: any) {
