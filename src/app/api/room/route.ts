@@ -14,6 +14,7 @@ interface RoomState {
   pendingQueue: any[];
   approvedUserIds: string[];
   rejectedUserIds: string[];
+  messages: any[];
   lastExecution?: any;
   updatedAt: number;
 }
@@ -64,7 +65,8 @@ export async function GET(req: NextRequest) {
     files: room.files,
     activeFileId: room.activeFileId,
     pendingQueue: room.pendingQueue,
-    participants: room.participants,
+    participants: room.participants || [],
+    messages: room.messages || [],
     userStatus,
     lastExecution: room.lastExecution,
     updatedAt: room.updatedAt,
@@ -100,6 +102,7 @@ export async function POST(req: NextRequest) {
         pendingQueue: existingRoom?.pendingQueue || [],
         approvedUserIds: [userId, ...(existingRoom?.approvedUserIds || [])],
         rejectedUserIds: existingRoom?.rejectedUserIds || [],
+        messages: existingRoom?.messages || [],
         updatedAt: Date.now(),
       };
 
@@ -116,7 +119,7 @@ export async function POST(req: NextRequest) {
         room = {
           code: roomCode,
           title: 'Collaborative Session',
-          hostUserId: '', // Empty until host connects
+          hostUserId: '',
           hostName: 'Host',
           approvalRequired: true,
           language: 'cpp',
@@ -126,6 +129,7 @@ export async function POST(req: NextRequest) {
           pendingQueue: [],
           approvedUserIds: [],
           rejectedUserIds: [],
+          messages: [],
           updatedAt: Date.now(),
         };
         roomStore.set(roomCode, room);
@@ -193,6 +197,20 @@ export async function POST(req: NextRequest) {
       room.lastExecution = payload?.execution;
       room.updatedAt = Date.now();
       return NextResponse.json({ success: true });
+    }
+
+    // 7. SEND CHAT MESSAGE
+    if (action === 'SEND_MESSAGE') {
+      if (payload?.message) {
+        if (!room.messages) room.messages = [];
+        if (!room.messages.some(m => m.id === payload.message.id)) {
+          room.messages.push(payload.message);
+          // Keep last 100 messages
+          if (room.messages.length > 100) room.messages = room.messages.slice(-100);
+        }
+        room.updatedAt = Date.now();
+      }
+      return NextResponse.json({ success: true, messages: room.messages });
     }
 
     return NextResponse.json({ success: true });
