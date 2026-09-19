@@ -141,15 +141,21 @@ export async function POST(req: NextRequest) {
         const stderr = runData.stderr || (runData.output && runData.code !== 0 ? runData.output : '');
         const exitCode = typeof runData.code === 'number' ? runData.code : 0;
 
-        return NextResponse.json({
-          stdout: stdout.trim(),
-          stderr: stderr.trim(),
-          output: (stdout || stderr).trim(),
-          code: exitCode,
-          executionTime,
-          language: langSpec.name,
-          version: data.version ? `Piston v${data.version}` : 'Piston Execution Engine',
-        });
+        // If Piston public server hits OCI container PID/crun process limits, fall through to Wandbox/Judge0
+        const isContainerOverload = /OCI runtime error|crun:|Resource temporarily unavailable|fork failed/i.test(stderr + stdout);
+
+        if (!isContainerOverload) {
+          return NextResponse.json({
+            stdout: stdout.trim(),
+            stderr: stderr.trim(),
+            output: (stdout || stderr).trim(),
+            code: exitCode,
+            executionTime,
+            language: langSpec.name,
+            version: data.version ? `Piston v${data.version}` : 'Piston Execution Engine',
+          });
+        }
+        console.warn('Piston container overload detected, switching to Wandbox/Judge0 engine...');
       }
     } catch (pistonError) {
       console.warn('Piston execution fallback triggered:', pistonError);
