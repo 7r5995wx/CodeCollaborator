@@ -139,7 +139,7 @@ function LandingPageContent() {
           </h1>
 
           <p className="text-slate-400 text-base md:text-lg max-w-2xl leading-relaxed">
-            Create a live coding room, invite your team, manage join approvals, edit code synchronously with live cursors, and execute code across 40+ programming languages on serverless infrastructure.
+            Create a live coding room, invite your team, manage join approvals, edit code synchronously with live cursors, and execute code across multiple programming languages on serverless infrastructure.
           </p>
 
           {/* Feature Highlights Grid */}
@@ -158,7 +158,7 @@ function LandingPageContent() {
 
             <div className="p-4 rounded-xl bg-dark-900/80 border border-white/5 col-span-2 sm:col-span-1">
               <Terminal className="w-5 h-5 text-emerald-400 mb-2" />
-              <h4 className="text-xs font-bold text-white mb-1">40+ Languages</h4>
+              <h4 className="text-xs font-bold text-white mb-1">Multi-Language</h4>
               <p className="text-[11px] text-slate-400">Piston engine code execution</p>
             </div>
           </div>
@@ -327,7 +327,7 @@ function LandingPageContent() {
       <footer className="p-6 text-center text-xs text-slate-500 border-t border-white/5 max-w-7xl w-full mx-auto z-10 flex flex-col sm:flex-row items-center justify-between gap-4">
         <span>© 2026 CodeCollaborator Engine. Real-Time Serverless Code Execution.</span>
         <div className="flex items-center gap-4">
-          <span className="hover:text-slate-300 cursor-pointer">40+ Languages Supported</span>
+          <span className="hover:text-slate-300 cursor-pointer">Multi-Language Supported</span>
           <span className="hover:text-slate-300 cursor-pointer">Monaco Editor</span>
           <span className="hover:text-slate-300 cursor-pointer">Vercel Deployable</span>
         </div>

@@ -8,7 +8,7 @@
 
 - 🔒 **Host Approval Waiting Room**: Hosts create sessions with a "Require Host Approval" toggle. Guests enter a real-time waiting room queue until the host approves entry.
 - ⚡ **Multiplayer Real-Time Code Sync**: Edit code collaboratively with real-time cursor tracking and text diff synchronization.
-- 🛠️ **40+ Programming Languages**: Run and compile JavaScript, TypeScript, Python 3, C++, Java, C#, Rust, Go, and live HTML/CSS/JS previews via the Piston API.
+- 🛠️ **Multi-Language Execution**: Run and compile JavaScript, TypeScript, Python 3, C++, Java, C#, Rust, Go, and live HTML/CSS/JS previews via the Piston API.
 - 💻 **Monaco Editor Engine**: Features VS Code syntax highlighting, line numbers, font sizing, and multiple editor themes (VS Dark, One Dark Pro, Cyberpunk Neon, Night Owl, Monokai).
 - 📁 **Multi-File Workspace**: Create, delete, and switch between workspace files (`main.js`, `utils.py`, `index.html`).
 - 📺 **Live Terminal Drawer & Output Broadcasting**: View `stdout`, `stderr`, execution duration, exit codes, and broadcast execution output to all room participants.

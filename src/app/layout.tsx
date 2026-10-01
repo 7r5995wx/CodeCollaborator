@@ -3,7 +3,7 @@ import './globals.css';
 
 export const metadata: Metadata = {
   title: 'CodeCollaborator - Real-Time Collaborative IDE & Code Execution Engine',
-  description: 'Create code sessions, collaborate live with remote cursors, compile and run code in 40+ programming languages, and share execution results in real-time.',
+  description: 'Create code sessions, collaborate live with remote cursors, compile and run code in multiple programming languages, and share execution results in real-time.',
   icons: {
     icon: '/favicon.ico',
   }
