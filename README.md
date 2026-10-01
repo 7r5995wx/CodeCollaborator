@@ -2,6 +2,10 @@
 
 **CodeCollaborator** is a full-stack real-time collaborative code editor and multi-language compilation platform built with Next.js 14, Monaco Editor, WebRTC, and the Piston Code Execution API.
 
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-Vercel-000000?style=for-the-badge&logo=vercel&logoColor=white)](https://code-collaborator-git-main-switchvishal.vercel.app)
+
+🌐 **Live Application Link**: [https://code-collaborator-git-main-switchvishal.vercel.app](https://code-collaborator-git-main-switchvishal.vercel.app)
+
 ---
 
 ## ✨ Features
